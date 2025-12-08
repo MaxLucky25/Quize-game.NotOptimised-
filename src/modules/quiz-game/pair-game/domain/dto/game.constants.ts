@@ -10,4 +10,8 @@ export const GAME_CONSTANTS = {
    * Бонус за быстрейшее завершение игры
    */
   BONUS_FOR_FASTEST_PLAYER: 1,
+  /**
+   * Таймаут в миллисекундах для завершения игры, если один игрок закончил
+   */
+  TIMEOUT_MS: 10000,
 } as const;

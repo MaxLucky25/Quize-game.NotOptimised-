@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { CqrsModule } from '@nestjs/cqrs';
+import { ScheduleModule } from '@nestjs/schedule';
 import { PairGame } from './domain/entities/pair-game.entity';
 import { Player } from './domain/entities/player.entity';
 import { GameQuestion } from './domain/entities/game-question.entity';
@@ -14,6 +15,7 @@ import { PairGameQueryRepository } from './infrastructure/query/pair-game.query-
 import { UserStatisticRepository } from './infrastructure/user-statistic.repository';
 import { MatchmakingService } from './domain/services/matchmaking.service';
 import { AnswerSubmissionService } from './domain/services/answer-submission.service';
+import { GameTimeoutService } from './domain/services/game-timeout.service';
 import { PairGameController } from './api/pair-game.controller';
 import { GetCurrentGameUseCase } from './application/query-usecase/get-current-game.usecase';
 import { GetGameByIdUseCase } from './application/query-usecase/get-game-by-id.usecase';
@@ -37,6 +39,7 @@ const CommandHandlers = [ConnectToGameUseCase, SubmitAnswerUseCase];
 @Module({
   imports: [
     CqrsModule,
+    ScheduleModule.forRoot(),
     QuestionsModule,
     TypeOrmModule.forFeature([
       PairGame,
@@ -57,6 +60,7 @@ const CommandHandlers = [ConnectToGameUseCase, SubmitAnswerUseCase];
     PairGameQueryRepository,
     UserStatisticRepository,
     MatchmakingService,
+    GameTimeoutService,
     AnswerSubmissionService,
   ],
   exports: [

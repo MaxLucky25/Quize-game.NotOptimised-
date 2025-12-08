@@ -37,6 +37,11 @@ export class CreatePairGamesTable1700000000006 implements MigrationInterface {
             type: 'timestamp',
             isNullable: true,
           },
+          {
+            name: 'any_player_finished_at',
+            type: 'timestamp',
+            isNullable: true,
+          },
         ],
       }),
       true,

@@ -14,6 +14,7 @@ import { PlayerRole } from '../dto/player-role.enum';
 
 @Entity('pair_games')
 @Index(['status', 'createdAt']) // для матчмейкинга (поиск ожидающих игр FIFO)
+@Index(['status', 'anyPlayerFinishedAt']) // для проверки таймаутов
 export class PairGame {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -43,6 +44,9 @@ export class PairGame {
   @Column({ name: 'finish_game_date', type: 'timestamp', nullable: true })
   finishGameDate: Date | null;
 
+  @Column({ name: 'any_player_finished_at', type: 'timestamp', nullable: true })
+  anyPlayerFinishedAt: Date | null;
+
   @OneToMany(() => Player, (player) => player.game, { cascade: true })
   players: Player[];
 
@@ -58,6 +62,7 @@ export class PairGame {
     const game = new PairGame();
     game.startGameDate = null;
     game.finishGameDate = null;
+    game.anyPlayerFinishedAt = null;
     // status установится автоматически через @Column({ default: GameStatus.PENDING_SECOND_PLAYER })
     // createdAt и updatedAt установятся автоматически через @CreateDateColumn и @UpdateDateColumn
 
@@ -79,6 +84,14 @@ export class PairGame {
   finishGame(): void {
     this.status = GameStatus.FINISHED;
     this.finishGameDate = new Date();
+    // updatedAt обновится автоматически через @UpdateDateColumn
+  }
+
+  /**
+   * Установить время завершения первого игрока (любого игрока, который закончил первым)
+   */
+  setAnyPlayerFinishedAt(): void {
+    this.anyPlayerFinishedAt = new Date();
     // updatedAt обновится автоматически через @UpdateDateColumn
   }
 

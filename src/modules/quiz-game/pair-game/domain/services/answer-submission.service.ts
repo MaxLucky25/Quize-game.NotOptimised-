@@ -7,17 +7,15 @@ import { GAME_CONSTANTS } from '../dto/game.constants';
 import { DomainException } from '../../../../../core/exceptions/domain-exceptions';
 import { DomainExceptionCode } from '../../../../../core/exceptions/domain-exception-codes';
 import { PlayerRepository } from '../../infrastructure/player.repository';
-import { PairGameRepository } from '../../infrastructure/pair-game.repository';
-import { UserStatisticRepository } from '../../infrastructure/user-statistic.repository';
+import { GameTimeoutService } from './game-timeout.service';
 
 @Injectable()
 export class AnswerSubmissionService {
   constructor(
     @InjectDataSource()
     private readonly dataSource: DataSource,
-    private readonly pairGameRepository: PairGameRepository,
     private readonly playerRepository: PlayerRepository,
-    private readonly userStatisticRepository: UserStatisticRepository,
+    private readonly gameTimeoutService: GameTimeoutService,
   ) {}
 
   async submitAnswer(userId: string, answer: string): Promise<GameAnswer> {
@@ -122,6 +120,21 @@ export class AnswerSubmissionService {
         playerInGame.finishedAt = updatedPlayer.finishedAt;
       }
 
+      // Если игрок закончил (ответил на последний вопрос) и это первый закончивший
+      if (nextQuestion.isLast() && updatedPlayer.hasFinished()) {
+        const otherPlayer = game.players.find((p) => p.id !== updatedPlayer.id);
+
+        // Если другой игрок еще не закончил и anyPlayerFinishedAt еще не установлен
+        if (
+          otherPlayer &&
+          !otherPlayer.hasFinished() &&
+          !game.anyPlayerFinishedAt
+        ) {
+          game.setAnyPlayerFinishedAt();
+          await manager.save(PairGame, game);
+        }
+      }
+
       // 10. Проверить и завершить игру если нужно
       await this.checkAndFinishGame(game, manager);
 
@@ -143,54 +156,15 @@ export class AnswerSubmissionService {
     const allPlayersFinished = game.players.every((p) => p.hasFinished());
 
     if (allPlayersFinished) {
-      // Вычисляем бонусы
       const firstPlayer = game.players.find((p) => p.isFirstPlayer());
       const secondPlayer = game.players.find((p) => p.isSecondPlayer());
 
       if (firstPlayer && secondPlayer) {
-        // Бонус получает тот, кто закончил быстрее И имеет хотя бы один правильный ответ
-        if (firstPlayer.finishedAt && secondPlayer.finishedAt) {
-          const fasterPlayer =
-            firstPlayer.finishedAt < secondPlayer.finishedAt
-              ? firstPlayer
-              : secondPlayer;
-
-          if (fasterPlayer.score > 0) {
-            fasterPlayer.awardBonus();
-          }
-        }
-
-        // Сохраняем игроков
-        await this.playerRepository.savePlayers(
-          [firstPlayer, secondPlayer],
-          manager,
-        );
-      }
-
-      // Завершаем игру
-      await this.pairGameRepository.finishGame(game, manager);
-
-      // Обновляем статистику игроков после завершения игры
-      if (firstPlayer && secondPlayer) {
-        // Безопасное вычисление счетов с защитой от NaN
-        const firstPlayerScore =
-          (firstPlayer.score || 0) + (firstPlayer.bonus || 0);
-        const secondPlayerScore =
-          (secondPlayer.score || 0) + (secondPlayer.bonus || 0);
-
-        // Обновляем статистику для первого игрока
-        await this.userStatisticRepository.updateStatisticAfterGame(
-          firstPlayer.userId,
-          firstPlayerScore,
-          secondPlayerScore,
-          manager,
-        );
-
-        // Обновляем статистику для второго игрока
-        await this.userStatisticRepository.updateStatisticAfterGame(
-          secondPlayer.userId,
-          secondPlayerScore,
-          firstPlayerScore,
+        // Используем общий метод из GameTimeoutService для завершения игры
+        await this.gameTimeoutService.finishGameWithPlayers(
+          game,
+          firstPlayer,
+          secondPlayer,
           manager,
         );
       }
