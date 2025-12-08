@@ -30,15 +30,15 @@ export class GameTimeoutService {
   async checkAndFinishTimedOutGames(): Promise<void> {
     // Оптимизированный запрос: загружаем только игроков (без questions и answers)
     // EXISTS подзапросы эффективны с индексами на players.finished_at
+    // Используем Date объект для надежного сравнения времени
+    const timeoutDate = new Date(Date.now() - GAME_CONSTANTS.TIMEOUT_MS);
+
     const games = await this.dataSource
       .createQueryBuilder(PairGame, 'game')
       .leftJoinAndSelect('game.players', 'players')
       .where('game.status = :status', { status: GameStatus.ACTIVE })
       .andWhere('game.anyPlayerFinishedAt IS NOT NULL')
-      .andWhere(
-        `game.any_player_finished_at < NOW() - (:timeoutMs || ' milliseconds')::INTERVAL`,
-        { timeoutMs: GAME_CONSTANTS.TIMEOUT_MS },
-      )
+      .andWhere('game.anyPlayerFinishedAt < :timeoutDate', { timeoutDate })
       .andWhere(
         `EXISTS (
           SELECT 1 FROM players p1 
