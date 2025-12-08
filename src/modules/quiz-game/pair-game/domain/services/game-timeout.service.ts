@@ -73,15 +73,42 @@ export class GameTimeoutService {
     unfinishedPlayer: Player,
   ): Promise<void> {
     await this.dataSource.transaction(async (manager) => {
+      // Блокируем игру для предотвращения race conditions
+      const lockedGame = await manager.findOne(PairGame, {
+        where: { id: game.id },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      // Проверяем, что игра еще активна (может быть уже завершена другим процессом)
+      if (!lockedGame || !lockedGame.isActive()) {
+        return; // Игра уже завершена, ничего не делаем
+      }
+
+      // Перезагружаем игрока с актуальными данными (включая ответы)
+      // Это важно, так как между проверкой и завершением игрок мог успеть ответить
+      const reloadedUnfinishedPlayer = await manager.findOne(Player, {
+        where: { id: unfinishedPlayer.id },
+        relations: ['answers'],
+      });
+
+      if (!reloadedUnfinishedPlayer) {
+        return; // Игрок не найден
+      }
+
+      // Проверяем, что игрок еще не закончил (может успеть ответить)
+      if (reloadedUnfinishedPlayer.hasFinished()) {
+        return; // Игрок уже закончил, игра должна завершиться обычным способом
+      }
+
       // Загружаем вопросы игры
       const gameQuestions = await manager.find(GameQuestion, {
         where: { gameId: game.id },
         order: { order: 'ASC' },
       });
 
-      // Находим неотвеченные вопросы
+      // Находим неотвеченные вопросы (используем актуальные данные)
       const answeredQuestionIds = new Set(
-        (unfinishedPlayer.answers || []).map((a) => a.gameQuestionId),
+        (reloadedUnfinishedPlayer.answers || []).map((a) => a.gameQuestionId),
       );
 
       const unansweredQuestions = gameQuestions.filter(
@@ -92,33 +119,47 @@ export class GameTimeoutService {
       const missingAnswers = unansweredQuestions.map((gq) =>
         GameAnswer.create({
           gameQuestionId: gq.id,
-          playerId: unfinishedPlayer.id,
+          playerId: reloadedUnfinishedPlayer.id,
           answer: '', // Пустой ответ для неотвеченных вопросов
           isCorrect: false,
         }),
       );
 
       if (missingAnswers.length > 0) {
-        await manager.save(GameAnswer, missingAnswers);
+        try {
+          await manager.save(GameAnswer, missingAnswers);
+        } catch (error: unknown) {
+          // Игнорируем ошибку уникальности (игрок мог успеть ответить между проверкой и сохранением)
+          // Другие ошибки пробрасываем дальше
+          if (
+            error !== null &&
+            typeof error === 'object' &&
+            'code' in error &&
+            error.code !== '23505'
+          ) {
+            throw error;
+          }
+          // Если ошибка уникальности - просто продолжаем, ответы уже созданы
+        }
       }
 
       // Обновляем счет игрока (учитываем только правильные ответы)
       // Счет уже должен быть правильным, так как он обновлялся при каждом ответе
       // Но нужно установить finishedAt
-      if (!unfinishedPlayer.finishedAt) {
-        unfinishedPlayer.finish();
+      if (!reloadedUnfinishedPlayer.finishedAt) {
+        reloadedUnfinishedPlayer.finish();
         await manager.update(
           Player,
-          { id: unfinishedPlayer.id },
+          { id: reloadedUnfinishedPlayer.id },
           {
-            finishedAt: unfinishedPlayer.finishedAt,
+            finishedAt: reloadedUnfinishedPlayer.finishedAt,
           },
         );
       }
 
       // Перезагружаем игроков с обновленными данными (включая новые ответы)
       const reloadedPlayers = await manager.find(Player, {
-        where: { gameId: game.id },
+        where: { gameId: lockedGame.id },
         relations: ['answers'],
       });
 
@@ -128,7 +169,7 @@ export class GameTimeoutService {
       if (firstPlayer && secondPlayer) {
         // Используем общий метод для завершения игры
         await this.finishGameWithPlayers(
-          game,
+          lockedGame,
           firstPlayer,
           secondPlayer,
           manager,
